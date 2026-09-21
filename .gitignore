@@ -4,3 +4,6 @@
 *.secret
 __pycache__/
 *.pyc
+
+# 运行时对话记录，仅本地保留，避免私人聊天内容外泄
+memory.json

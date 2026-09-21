@@ -12,6 +12,14 @@ api_key = os.getenv("DEEPSEEK_API_KEY")
 if not api_key:
     raise ValueError("没有找到 DEEPSEEK_API_KEY，请检查 .env 文件或系统环境变量")
 
+#文件路径设置
+# 获取当前脚本所在的文件夹路径
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# 拼接出 memory.json 的绝对路径
+MEMORY_FILE = os.path.join(BASE_DIR, "memory.json")
+
+
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
       "AppleWebKit/537.36 Chrome/120.0 Safari/537.36")
 
@@ -70,16 +78,24 @@ def get_weather(city):
 def send_message(content):
     return "成功发送消息：" + content
 
+#读取记忆文件，如果不存在则创建
+open(MEMORY_FILE, "a", encoding="utf-8").close()
+try:
+    with open(MEMORY_FILE, "r", encoding="utf-8") as f:
+        messages = json.load(f)
+except json.JSONDecodeError:
+    messages = []
 # 2. 系统提示词，告诉AI怎么用工具
-messages = [
-    {"role": "system", "content": "你是一个AI助手。如果用户问天气，请只输出JSON：\
+system_prompt = {"role": "system", "content": "你是一个AI助手。如果用户问天气，请只输出JSON：\
 {\"tool\": \"get_weather\", \"city\": \"城市名\"}。如果用户让你发消息，请只输出JSON：\
 {\"tool\": \"send_message\", \"content\": \"消息内容\"}。\
 如果用户问多个城市，请输出一个包含多个对象的json格式。如：[{\"tool\": \"get_weather\", \"city\": \"秦皇岛\"}, {\"tool\": \"get_weather\", \"city\": \"衡水\"}]，不要输出其他任何文字。"}
-]
+
+if not messages or messages[0].get("role") != "system":
+    messages = [system_prompt] + messages
 
 print("=== AI Agent 启动，输入'退出'结束 ===")
-
+#start the chat loop
 while True:
     user_input = input("你: ")
     if user_input == "quit" or user_input == "退出" or user_input == "q":
@@ -100,7 +116,7 @@ while True:
     # 3. 尝试解析AI的回复是不是JSON指令
     # 清理一下格式，防止AI偶尔加引号或markdown标记
     clean_reply = ai_reply.strip().replace("```json", "").replace("```", "")
-    
+
     try:
         all_results = json.loads(clean_reply)
         if isinstance(all_results, dict):
@@ -138,14 +154,23 @@ while True:
             final_resp = requests.post(url, headers=api_headers, json={"model": "deepseek-chat", "messages": messages}, timeout=30)
             final_reply = final_resp.json()["choices"][0]["message"]["content"]
             print("AI:", final_reply)
-            messages.append({"role": "assistant", "content": final_reply})
         else:
             # 没有tool关键字，就正常聊天
             print("AI:", ai_reply)
-            messages.append({"role": "assistant", "content": ai_reply})        
-
+            messages.append({"role": "assistant", "content": ai_reply})
+        with open(MEMORY_FILE, "w", encoding="utf-8") as f:
+            #过滤掉system角色的消息，避免记忆文件过大  和工具返回数据的消息，避免记忆文件过大
+            cleaned_messages = [m for m in messages if (m.get("role") != "system") and not (m.get("role") == "assistant" and ("tool" in m.get("content", ""))) \
+                                and not (m.get("role") == "user" and ("工具返回数据" in m.get("content", "")))]
+            json.dump(cleaned_messages, f, ensure_ascii=False, indent=4)
+        
                 
     except json.JSONDecodeError:
         # 如果AI输出的是普通对话不是JSON，直接打印
         print("AI:", ai_reply)
         messages.append({"role": "assistant", "content": ai_reply})
+        with open(MEMORY_FILE, "w", encoding="utf-8") as f:
+            #过滤掉system角色的消息，避免记忆文件过大  和工具返回数据的消息，避免记忆文件过大
+            cleaned_messages = [m for m in messages if (m.get("role") != "system") and not (m.get("role") == "assistant" and ("tool" in m.get("content", ""))) \
+                and not (m.get("role") == "user" and ("工具返回数据" in m.get("content", "")))]
+            json.dump(cleaned_messages, f, ensure_ascii=False, indent=4)
